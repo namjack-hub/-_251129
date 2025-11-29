@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Book, ApiKeys, FetchSource, GeminiAnalysis, SearchTarget, FilterState, SortState } from './types';
+import { Book, ApiKeys, FetchSource, GeminiAnalysis, SearchTarget, FilterState, SortState, BudgetSettings, BudgetStatus } from './types';
 import { fetchBooks, searchBooks } from './services/bookService';
 import { analyzeAcquisitionList } from './services/geminiService';
+import { DEFAULT_BUDGET_SETTINGS, calculateBudgetStatus } from './utils/budgetUtils';
 import BookCard from './components/BookCard';
 import ApiKeyModal from './components/ApiKeyModal';
 import BookFilterPanel from './components/BookFilterPanel';
-import { Settings, Search, BookOpen, Star, TrendingUp, ArrowRight, Sparkles, Download, Loader2, AlertCircle, Key, Library, BookCopy, Zap, Award, RotateCcw, Filter } from 'lucide-react';
+import BudgetManager from './components/BudgetManager';
+import BudgetDashboard from './components/BudgetDashboard';
+import { Settings, Search, BookOpen, Star, TrendingUp, ArrowRight, Sparkles, Download, Loader2, AlertCircle, Key, Library, BookCopy, Zap, Award, RotateCcw, Filter, PieChart } from 'lucide-react';
 
 function App() {
   // Kanban Columns
@@ -52,6 +55,18 @@ function App() {
     };
   });
 
+  // --- Budget State ---
+  const [isBudgetManagerOpen, setIsBudgetManagerOpen] = useState(false);
+  const [budgetSettings, setBudgetSettings] = useState<BudgetSettings>(() => {
+     const saved = localStorage.getItem('smart_acquisition_budget');
+     return saved ? JSON.parse(saved) : DEFAULT_BUDGET_SETTINGS;
+  });
+
+  // Calculate Budget Status
+  const budgetStatus: BudgetStatus = useMemo(() => {
+     return calculateBudgetStatus(confirmedBooks, budgetSettings);
+  }, [confirmedBooks, budgetSettings]);
+
   const [apiKeys, setApiKeys] = useState<ApiKeys>(() => {
     const saved = localStorage.getItem('smart_acquisition_keys');
     const initial = saved ? JSON.parse(saved) : { aladinTtb: '', nlkApiKey: '' };
@@ -64,7 +79,7 @@ function App() {
     return initial;
   });
 
-  // Persist Filters & Sort
+  // Persist Settings
   useEffect(() => {
     localStorage.setItem('smart_acquisition_filters', JSON.stringify(filterState));
   }, [filterState]);
@@ -72,6 +87,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('smart_acquisition_sort', JSON.stringify(sortState));
   }, [sortState]);
+  
+  useEffect(() => {
+    localStorage.setItem('smart_acquisition_budget', JSON.stringify(budgetSettings));
+  }, [budgetSettings]);
 
   // Update excluded IDs ref whenever lists change
   useEffect(() => {
@@ -257,6 +276,7 @@ function App() {
       setDiscoveryBooks(prev => prev.filter(b => b.id !== book.id));
       setReviewBooks(prev => [{ ...book, status: 'review' }, ...prev]);
     } else if (action === 'approve') {
+      // Logic for budget warning could go here in future
       setReviewBooks(prev => prev.filter(b => b.id !== book.id));
       setConfirmedBooks(prev => [{ ...book, status: 'confirmed' }, ...prev]);
       setAnalysis(null);
@@ -290,6 +310,21 @@ function App() {
 
     // Create CSV content with BOM for Korean character support in Excel
     const bom = '\uFEFF';
+    
+    // Budget Summary Section
+    const budgetSummary = [
+        ['[예산 요약]'],
+        ['총 예산', budgetSettings.totalBudget],
+        ['총 사용액', budgetStatus.totalUsed],
+        ['잔액', budgetStatus.totalRemaining],
+        ['집행률(%)', budgetStatus.totalUsagePercentage.toFixed(2)],
+        [''],
+        ['[카테고리별 집행]'],
+        ...budgetStatus.categoryStatuses.map(c => [c.name, `배정: ${c.allocatedAmount}`, `사용: ${c.usedAmount}`, `집행률: ${c.usagePercentage.toFixed(1)}%`]),
+        [''],
+        ['[도서 목록]']
+    ];
+
     const headers = ['제목', '저자', '출판사', '출판일', '정가', '판매가', 'ISBN', '카테고리'];
     const rows = confirmedBooks.map(book => [
       `"${book.title.replace(/"/g, '""')}"`,
@@ -303,6 +338,7 @@ function App() {
     ]);
 
     const csvContent = bom + [
+      ...budgetSummary.map(row => row.join(',')),
       headers.join(','),
       ...rows.map(row => row.join(','))
     ].join('\n');
@@ -413,6 +449,16 @@ function App() {
                </button>
             </div>
             <div className="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
+            
+            {/* Budget Button */}
+            <button
+               onClick={() => setIsBudgetManagerOpen(true)}
+               className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-100 text-gray-600 dark:text-gray-300 transition-colors whitespace-nowrap"
+            >
+               <PieChart size={18} />
+               예산 관리
+            </button>
+
             <button
               onClick={() => setIsKeyModalOpen(true)}
               className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap ${(!apiKeys.aladinTtb && activeSource !== 'editorRecommend') || (!apiKeys.nlkApiKey && activeSource === 'editorRecommend') ? 'bg-red-100 text-red-600 animate-pulse' : 'hover:bg-gray-100 text-gray-600 dark:text-gray-300'}`}
@@ -483,7 +529,7 @@ function App() {
               </form>
             </div>
 
-            {/* Filter Panel (Inserted here) */}
+            {/* Filter Panel */}
             <BookFilterPanel 
               books={discoveryBooks}
               filterState={filterState}
@@ -573,13 +619,13 @@ function App() {
               <h2 className="font-bold text-gray-800 dark:text-gray-200">최종 확정</h2>
               <span className="rounded-full bg-green-200 px-2 py-0.5 text-xs font-medium dark:bg-green-900">{confirmedBooks.length}</span>
             </div>
-            <div className="text-sm font-bold text-green-700 dark:text-green-400">
-              {totalAmount.toLocaleString()}원
-            </div>
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
             
+            {/* Budget Dashboard */}
+            <BudgetDashboard status={budgetStatus} />
+
             {/* Analysis Result Block */}
             {analysis && (
               <div className="mb-4 rounded-xl bg-white p-4 shadow-sm border border-green-100 dark:bg-slate-800 dark:border-gray-700 animate-fade-in-up">
@@ -645,6 +691,13 @@ function App() {
         onClose={() => setIsKeyModalOpen(false)}
         onSave={handleSaveKeys}
         initialKeys={apiKeys}
+      />
+
+      <BudgetManager
+        isOpen={isBudgetManagerOpen}
+        onClose={() => setIsBudgetManagerOpen(false)}
+        onSave={(newSettings) => setBudgetSettings(newSettings)}
+        currentSettings={budgetSettings}
       />
     </div>
   );

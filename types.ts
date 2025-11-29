@@ -56,3 +56,39 @@ export interface SortState {
   field: SortField;
   direction: SortDirection;
 }
+
+// --- Budget Management Types ---
+
+export interface CategoryAllocation {
+  id: string;
+  name: string; // e.g., "Literature", "Science"
+  percentage: number; // 0-100
+}
+
+export interface BudgetSettings {
+  totalBudget: number;
+  startDate: string;
+  endDate: string;
+  allocations: CategoryAllocation[];
+}
+
+export interface CategoryStatus {
+  id: string;
+  name: string;
+  allocatedAmount: number;
+  usedAmount: number;
+  remainingAmount: number;
+  usagePercentage: number;
+  bookCount: number;
+  isExceeded: boolean;
+}
+
+export interface BudgetStatus {
+  totalBudget: number;
+  totalUsed: number;
+  totalRemaining: number;
+  totalUsagePercentage: number;
+  categoryStatuses: CategoryStatus[];
+  isTotalExceeded: boolean;
+  alertLevel: 'safe' | 'warning' | 'danger'; // <80%, 80-99%, >=100%
+}
