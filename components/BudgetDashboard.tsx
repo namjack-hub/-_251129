@@ -1,9 +1,11 @@
+
 import React, { useState } from 'react';
 import { BudgetStatus } from '../types';
 import { ChevronDown, ChevronUp, AlertCircle, TrendingUp, PieChart } from 'lucide-react';
 
 interface BudgetDashboardProps {
   status: BudgetStatus;
+  compact?: boolean; // For mobile modal usage
 }
 
 const ProgressBar: React.FC<{ percentage: number; colorClass?: string; height?: string }> = ({ 
@@ -22,8 +24,8 @@ const ProgressBar: React.FC<{ percentage: number; colorClass?: string; height?: 
   );
 };
 
-const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ status }) => {
-  const [isExpanded, setIsExpanded] = useState(true);
+const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ status, compact = false }) => {
+  const [isExpanded, setIsExpanded] = useState(!compact);
 
   // Determine main color based on alert level
   const getMainColor = () => {
@@ -43,15 +45,21 @@ const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ status }) => {
   };
 
   return (
-    <div className="mb-4 rounded-2xl bg-white border border-gray-200 shadow-sm overflow-hidden dark:bg-slate-800 dark:border-gray-700 transition-all">
+    <div className={`
+      bg-white border border-gray-200 shadow-sm overflow-hidden dark:bg-slate-800 dark:border-gray-700 transition-all
+      ${compact ? 'rounded-xl' : 'rounded-2xl mb-4'}
+    `}>
       {/* Header Summary */}
-      <div className="p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700/50" onClick={() => setIsExpanded(!isExpanded)}>
+      <div 
+        className={`cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700/50 ${compact ? 'p-3' : 'p-4'}`} 
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
             <div className={`p-1.5 rounded-lg ${status.alertLevel === 'danger' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
                <TrendingUp size={16} />
             </div>
-            <h3 className="font-bold text-gray-800 dark:text-gray-200">예산 현황</h3>
+            <h3 className="font-bold text-gray-800 dark:text-gray-200 text-sm md:text-base">예산 현황</h3>
             {status.alertLevel !== 'safe' && (
                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${status.alertLevel === 'danger' ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
                   {status.alertLevel === 'danger' ? '초과' : '주의'}
@@ -62,23 +70,19 @@ const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ status }) => {
         </div>
 
         <div className="flex items-end justify-between mb-1">
-           <span className="text-2xl font-bold text-gray-900 dark:text-white">
-              {status.totalUsed.toLocaleString()}원
+           <span className="text-xl md:text-2xl font-bold text-gray-900 dark:text-white">
+              {status.totalUsed.toLocaleString()}
+              <span className="text-sm font-normal text-gray-500 ml-1">원</span>
            </span>
            <span className="text-xs text-gray-500">
-              / {status.totalBudget.toLocaleString()}원
+              {status.totalUsagePercentage.toFixed(1)}%
            </span>
         </div>
         
         <ProgressBar percentage={status.totalUsagePercentage} colorClass={getMainColor()} />
         
-        <div className="mt-1 flex justify-between text-xs font-medium">
-           <span className={`${getMainTextColor()}`}>
-              {status.totalUsagePercentage.toFixed(1)}% 사용
-           </span>
-           <span className="text-gray-500">
-              잔액: {status.totalRemaining.toLocaleString()}원
-           </span>
+        <div className="mt-1 flex justify-end text-xs font-medium text-gray-500">
+           잔액: {status.totalRemaining.toLocaleString()}원
         </div>
       </div>
 
@@ -97,7 +101,7 @@ const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ status }) => {
                           {cat.name}
                        </span>
                        <span className={cat.isExceeded ? 'text-red-600 font-bold' : 'text-gray-500'}>
-                          {cat.usedAmount.toLocaleString()} / {cat.allocatedAmount.toLocaleString()}
+                          {cat.usedAmount.toLocaleString()} <span className="text-gray-300">/</span> {cat.allocatedAmount.toLocaleString()}
                        </span>
                     </div>
                     <ProgressBar 
@@ -114,7 +118,7 @@ const BudgetDashboard: React.FC<BudgetDashboardProps> = ({ status }) => {
                  <AlertCircle size={14} className="mt-0.5 shrink-0" />
                  <div>
                     <span className="font-bold block mb-1">예산 초과 경고</span>
-                    총 예산 범위를 초과했습니다. 확정 목록을 조정하거나 예산을 증액하세요.
+                    총 예산 범위를 초과했습니다.
                  </div>
               </div>
            )}

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Book, ApiKeys, FetchSource, GeminiAnalysis, SearchTarget, FilterState, SortState, BudgetSettings, BudgetStatus } from './types';
 import { fetchBooks, searchBooks } from './services/bookService';
@@ -8,15 +9,21 @@ import ApiKeyModal from './components/ApiKeyModal';
 import BookFilterPanel from './components/BookFilterPanel';
 import BudgetManager from './components/BudgetManager';
 import BudgetDashboard from './components/BudgetDashboard';
-import { Settings, Search, BookOpen, Star, TrendingUp, ArrowRight, Sparkles, Download, Loader2, AlertCircle, Key, Library, BookCopy, Zap, Award, RotateCcw, Filter, PieChart } from 'lucide-react';
+import { Settings, Search, BookOpen, Star, TrendingUp, ArrowRight, Sparkles, Download, Loader2, AlertCircle, Key, Library, BookCopy, Zap, Award, RotateCcw, Filter, PieChart, LayoutList, CheckSquare, X } from 'lucide-react';
+
+// Mobile Tab Types
+type MobileTab = 'discovery' | 'review' | 'confirmed';
 
 function App() {
-  // Kanban Columns
+  // Kanban Columns Data
   const [discoveryBooks, setDiscoveryBooks] = useState<Book[]>([]);
   const [reviewBooks, setReviewBooks] = useState<Book[]>([]);
   const [confirmedBooks, setConfirmedBooks] = useState<Book[]>([]);
   
-  // Refs to track excluded IDs without triggering re-renders or effect dependencies
+  // Mobile Navigation State
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileTab>('discovery');
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+
   const excludedIdsRef = useRef<Set<string>>(new Set());
 
   const [isLoading, setIsLoading] = useState(false);
@@ -24,45 +31,34 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTarget, setSearchTarget] = useState<SearchTarget>('Keyword');
   const [isSearching, setIsSearching] = useState(false);
-  
-  // Pagination state
   const [page, setPage] = useState(1);
 
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   
-  // AI Analysis State
   const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
-  // --- Filter & Sort States ---
+  // Filter & Sort
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [filterState, setFilterState] = useState<FilterState>(() => {
     const saved = localStorage.getItem('smart_acquisition_filters');
-    return saved ? JSON.parse(saved) : {
-      priceRange: 'all',
-      categories: [],
-      pubYear: 'all',
-      publishers: []
-    };
+    return saved ? JSON.parse(saved) : { priceRange: 'all', categories: [], pubYear: 'all', publishers: [] };
   });
   
   const [sortState, setSortState] = useState<SortState>(() => {
     const saved = localStorage.getItem('smart_acquisition_sort');
-    return saved ? JSON.parse(saved) : {
-      field: 'pubDate',
-      direction: 'desc'
-    };
+    return saved ? JSON.parse(saved) : { field: 'pubDate', direction: 'desc' };
   });
 
-  // --- Budget State ---
+  // Budget
   const [isBudgetManagerOpen, setIsBudgetManagerOpen] = useState(false);
+  const [isBudgetDashboardOpen, setIsBudgetDashboardOpen] = useState(false); // For mobile modal
   const [budgetSettings, setBudgetSettings] = useState<BudgetSettings>(() => {
      const saved = localStorage.getItem('smart_acquisition_budget');
      return saved ? JSON.parse(saved) : DEFAULT_BUDGET_SETTINGS;
   });
 
-  // Calculate Budget Status
   const budgetStatus: BudgetStatus = useMemo(() => {
      return calculateBudgetStatus(confirmedBooks, budgetSettings);
   }, [confirmedBooks, budgetSettings]);
@@ -70,38 +66,25 @@ function App() {
   const [apiKeys, setApiKeys] = useState<ApiKeys>(() => {
     const saved = localStorage.getItem('smart_acquisition_keys');
     const initial = saved ? JSON.parse(saved) : { aladinTtb: '', nlkApiKey: '' };
-    
-    // Set default Aladin Key if empty
-    if (!initial.aladinTtb) {
-      initial.aladinTtb = 'ttbnamyeogi1645001';
-    }
-    
+    if (!initial.aladinTtb) initial.aladinTtb = 'ttbnamyeogi1645001';
     return initial;
   });
 
-  // Persist Settings
+  // Effects
   useEffect(() => {
-    localStorage.setItem('smart_acquisition_filters', JSON.stringify(filterState));
-  }, [filterState]);
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('smart_acquisition_sort', JSON.stringify(sortState));
-  }, [sortState]);
-  
-  useEffect(() => {
-    localStorage.setItem('smart_acquisition_budget', JSON.stringify(budgetSettings));
-  }, [budgetSettings]);
+  useEffect(() => localStorage.setItem('smart_acquisition_filters', JSON.stringify(filterState)), [filterState]);
+  useEffect(() => localStorage.setItem('smart_acquisition_sort', JSON.stringify(sortState)), [sortState]);
+  useEffect(() => localStorage.setItem('smart_acquisition_budget', JSON.stringify(budgetSettings)), [budgetSettings]);
+  useEffect(() => { excludedIdsRef.current = new Set([...reviewBooks, ...confirmedBooks].map(b => b.id)); }, [reviewBooks, confirmedBooks]);
 
-  // Update excluded IDs ref whenever lists change
-  useEffect(() => {
-    excludedIdsRef.current = new Set([...reviewBooks, ...confirmedBooks].map(b => b.id));
-  }, [reviewBooks, confirmedBooks]);
-
-  // --- Filtering & Sorting Logic (useMemo) ---
+  // Data Processing
   const filteredDiscoveryBooks = useMemo(() => {
     let result = [...discoveryBooks];
-
-    // 1. Filter
     if (filterState.priceRange !== 'all') {
       result = result.filter(book => {
         const price = book.priceSales;
@@ -114,15 +97,12 @@ function App() {
         }
       });
     }
-
     if (filterState.pubYear !== 'all') {
       const now = new Date();
       result = result.filter(book => {
         const pubDate = new Date(book.pubDate);
         if (isNaN(pubDate.getTime())) return true;
-        const diffTime = Math.abs(now.getTime() - pubDate.getTime());
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+        const diffDays = Math.ceil(Math.abs(now.getTime() - pubDate.getTime()) / (1000 * 60 * 60 * 24));
         switch (filterState.pubYear) {
           case '1yr': return diffDays <= 365;
           case '3yr': return diffDays <= 365 * 3;
@@ -131,152 +111,68 @@ function App() {
         }
       });
     }
+    if (filterState.categories.length > 0) result = result.filter(book => filterState.categories.some(cat => book.categoryName?.includes(cat)));
+    if (filterState.publishers.length > 0) result = result.filter(book => filterState.publishers.includes(book.publisher));
 
-    if (filterState.categories.length > 0) {
-      result = result.filter(book => {
-        if (!book.categoryName) return false;
-        // Check if any selected category matches
-        return filterState.categories.some(cat => book.categoryName?.includes(cat));
-      });
-    }
-
-    if (filterState.publishers.length > 0) {
-      result = result.filter(book => filterState.publishers.includes(book.publisher));
-    }
-
-    // 2. Sort
     result.sort((a, b) => {
       let comparison = 0;
-      
       switch (sortState.field) {
-        case 'priceSales':
-          comparison = a.priceSales - b.priceSales;
-          break;
-        case 'pubDate':
-          comparison = new Date(a.pubDate).getTime() - new Date(b.pubDate).getTime();
-          break;
-        case 'title':
-          comparison = a.title.localeCompare(b.title);
-          break;
-        case 'author':
-          comparison = a.author.localeCompare(b.author);
-          break;
-        default:
-          comparison = 0;
+        case 'priceSales': comparison = a.priceSales - b.priceSales; break;
+        case 'pubDate': comparison = new Date(a.pubDate).getTime() - new Date(b.pubDate).getTime(); break;
+        case 'title': comparison = a.title.localeCompare(b.title); break;
+        case 'author': comparison = a.author.localeCompare(b.author); break;
       }
-
       return sortState.direction === 'asc' ? comparison : -comparison;
     });
-
     return result;
   }, [discoveryBooks, filterState, sortState]);
 
-
-  // Data Fetching
+  // API Calls
   const loadDiscoveryBooks = useCallback(async (source: FetchSource, currentPage: number) => {
-    // Pre-checks for keys
-    if (source === 'editorRecommend' && !apiKeys.nlkApiKey) {
-       setDiscoveryBooks([]);
-       return;
-    }
-    if ((source === 'combined' || source === 'bestseller' || source === 'itemNewSpecial') && !apiKeys.aladinTtb) {
-      setDiscoveryBooks([]);
-      return;
-    }
-
-    setIsLoading(true);
-    setFetchError(null);
-    
+    if (source === 'editorRecommend' && !apiKeys.nlkApiKey) { setDiscoveryBooks([]); return; }
+    if (source !== 'editorRecommend' && !apiKeys.aladinTtb) { setDiscoveryBooks([]); return; }
+    setIsLoading(true); setFetchError(null);
     try {
       const data = await fetchBooks(source, apiKeys.aladinTtb, apiKeys.nlkApiKey, currentPage);
-      
-      // Filter using the ref to avoid effect dependency on review/confirmed lists
       const currentExcluded = excludedIdsRef.current;
-      const freshData = data.filter(b => !currentExcluded.has(b.id));
-      
-      setDiscoveryBooks(freshData);
+      setDiscoveryBooks(data.filter(b => !currentExcluded.has(b.id)));
     } catch (error) {
-      console.error("Failed to fetch books", error);
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      setFetchError(`도서 정보를 불러오는데 실패했습니다. (${msg})`);
+      setFetchError(`도서 정보 로드 실패: ${error instanceof Error ? error.message : "알 수 없는 오류"}`);
       setDiscoveryBooks([]);
     } finally {
       setIsLoading(false);
     }
-  }, [apiKeys.aladinTtb, apiKeys.nlkApiKey]);
+  }, [apiKeys]);
 
-  // Effect to load books when source changes (reset page) or keys update
-  useEffect(() => {
-    if (!searchQuery) {
-       loadDiscoveryBooks(activeSource, page);
-    }
-  }, [activeSource, loadDiscoveryBooks, page]); // Remove searchQuery from dependency to prevent loop
+  useEffect(() => { if (!searchQuery) loadDiscoveryBooks(activeSource, page); }, [activeSource, loadDiscoveryBooks, page]);
 
-  // Handler for source change - resets page
   const handleSourceChange = (source: FetchSource) => {
-    if (source === 'editorRecommend' && !apiKeys.nlkApiKey) {
-      setIsKeyModalOpen(true);
-    }
-    setActiveSource(source);
-    setPage(1); // Reset to first page on source change
-    setSearchQuery('');
+    if (source === 'editorRecommend' && !apiKeys.nlkApiKey) setIsKeyModalOpen(true);
+    setActiveSource(source); setPage(1); setSearchQuery('');
   };
 
   const handleSearch = async (e?: React.FormEvent, targetPage: number = 1) => {
     if (e) e.preventDefault();
     if (!searchQuery.trim() || !apiKeys.aladinTtb) return;
-
-    setIsSearching(true);
-    setIsLoading(true);
-    setFetchError(null);
-    
-    // Reset page if this is a new search submit (not a pagination call)
+    setIsSearching(true); setIsLoading(true); setFetchError(null);
     if (targetPage === 1) setPage(1);
-
     try {
       const data = await searchBooks(searchQuery, apiKeys.aladinTtb, searchTarget, targetPage);
       const currentExcluded = excludedIdsRef.current;
-      const freshData = data.filter(b => !currentExcluded.has(b.id));
-      
-      if (data.length === 0) {
-         setFetchError("최근 1년 이내의 검색 결과가 없습니다.");
-      }
-      
-      setDiscoveryBooks(freshData);
+      setDiscoveryBooks(data.filter(b => !currentExcluded.has(b.id)));
+      if (data.length === 0) setFetchError("검색 결과가 없습니다.");
     } catch (error) {
-      console.error("Search failed", error);
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      setFetchError(`검색에 실패했습니다. (${msg})`);
+      setFetchError(`검색 실패: ${error instanceof Error ? error.message : "오류"}`);
     } finally {
-      setIsLoading(false);
-      setIsSearching(false);
+      setIsLoading(false); setIsSearching(false);
     }
   };
 
-  const handleRefresh = () => {
-    const nextPage = page + 1;
-    setPage(nextPage);
-    
-    if (searchQuery && activeSource !== 'editorRecommend') {
-      handleSearch(undefined, nextPage);
-    }
-    // Note: useEffect will handle the fetch for category sources when `page` updates
-  };
-
-  const handleSaveKeys = (keys: ApiKeys) => {
-    setApiKeys(keys);
-    localStorage.setItem('smart_acquisition_keys', JSON.stringify(keys));
-    // Force reload by resetting page or source triggering effect
-    setPage(1);
-  };
-
-  // Kanban Actions
   const moveBook = (book: Book, action: 'add' | 'approve' | 'remove' | 'return') => {
     if (action === 'add') {
       setDiscoveryBooks(prev => prev.filter(b => b.id !== book.id));
       setReviewBooks(prev => [{ ...book, status: 'review' }, ...prev]);
     } else if (action === 'approve') {
-      // Logic for budget warning could go here in future
       setReviewBooks(prev => prev.filter(b => b.id !== book.id));
       setConfirmedBooks(prev => [{ ...book, status: 'confirmed' }, ...prev]);
       setAnalysis(null);
@@ -297,414 +193,247 @@ function App() {
     try {
       const result = await analyzeAcquisitionList(confirmedBooks);
       setAnalysis(result);
-    } catch (error) {
-      console.error(error);
-      alert("AI 분석에 실패했습니다. 잠시 후 다시 시도해주세요.");
-    } finally {
-      setIsAnalyzing(false);
-    }
+    } catch { alert("분석 실패"); } finally { setIsAnalyzing(false); }
   };
 
   const handleDownloadOrder = () => {
     if (confirmedBooks.length === 0) return;
-
-    // Create CSV content with BOM for Korean character support in Excel
     const bom = '\uFEFF';
-    
-    // Budget Summary Section
-    const budgetSummary = [
-        ['[예산 요약]'],
-        ['총 예산', budgetSettings.totalBudget],
-        ['총 사용액', budgetStatus.totalUsed],
-        ['잔액', budgetStatus.totalRemaining],
-        ['집행률(%)', budgetStatus.totalUsagePercentage.toFixed(2)],
-        [''],
-        ['[카테고리별 집행]'],
-        ...budgetStatus.categoryStatuses.map(c => [c.name, `배정: ${c.allocatedAmount}`, `사용: ${c.usedAmount}`, `집행률: ${c.usagePercentage.toFixed(1)}%`]),
-        [''],
-        ['[도서 목록]']
-    ];
-
-    const headers = ['제목', '저자', '출판사', '출판일', '정가', '판매가', 'ISBN', '카테고리'];
-    const rows = confirmedBooks.map(book => [
-      `"${book.title.replace(/"/g, '""')}"`,
-      `"${book.author.replace(/"/g, '""')}"`,
-      `"${book.publisher.replace(/"/g, '""')}"`,
-      `"${book.pubDate}"`,
-      book.priceStandard,
-      book.priceSales,
-      `"${book.isbn13}"`,
-      `"${book.categoryName || ''}"`
-    ]);
-
     const csvContent = bom + [
-      ...budgetSummary.map(row => row.join(',')),
-      headers.join(','),
-      ...rows.map(row => row.join(','))
+      ['제목', '저자', '출판사', '출판일', '정가', '판매가', 'ISBN', '카테고리'].join(','),
+      ...confirmedBooks.map(b => [
+        `"${b.title.replace(/"/g, '""')}"`, `"${b.author}"`, `"${b.publisher}"`, `"${b.pubDate}"`, b.priceStandard, b.priceSales, `"${b.isbn13}"`, `"${b.categoryName}"`
+      ].join(','))
     ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
-    
-    const dateStr = new Date().toISOString().split('T')[0];
-    link.href = url;
-    link.setAttribute('download', `도서수서목록_${dateStr}.csv`);
-    document.body.appendChild(link);
+    link.href = url; link.download = `도서수서목록_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
-    document.body.removeChild(link);
   };
 
-  const totalAmount = confirmedBooks.reduce((sum, item) => sum + item.priceSales, 0);
-
-  // Render Helpers
-  const renderDiscoveryEmptyState = () => {
-    if (activeSource === 'editorRecommend' && !apiKeys.nlkApiKey) {
-      return (
-        <div className="flex h-full flex-col items-center justify-center text-center text-gray-400 p-4">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-50 dark:bg-slate-700">
-             <Library size={32} className="text-green-500" />
-          </div>
-          <h3 className="text-lg font-bold text-gray-700 dark:text-gray-200">사서 추천 API 키 필요</h3>
-          <p className="mb-6 text-sm">국립중앙도서관 API 키를 입력하여<br/>사서 추천 도서를 확인하세요.</p>
-          <button onClick={() => setIsKeyModalOpen(true)} className="rounded-lg bg-green-600 px-4 py-2 text-sm font-bold text-white hover:bg-green-700 shadow-lg">
-             키 입력하기
-          </button>
-        </div>
-      );
+  const renderEmptyState = (type: 'discovery' | 'review' | 'confirmed') => {
+    if (type === 'discovery') {
+       if (fetchError) return <div className="p-8 text-center text-gray-400"><AlertCircle className="mx-auto mb-2" />{fetchError}<button onClick={() => loadDiscoveryBooks(activeSource, page)} className="block mx-auto mt-2 underline">재시도</button></div>;
+       return <div className="p-8 text-center text-gray-400"><Search className="mx-auto mb-2 opacity-20" size={48} /><p>도서가 없습니다.</p></div>;
     }
-    if (!apiKeys.aladinTtb) {
-      return (
-        <div className="flex h-full flex-col items-center justify-center text-center text-gray-400 p-4">
-           <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-slate-700">
-              <Key size={32} className="text-gray-300" />
+    if (type === 'review') return <div className="p-8 text-center text-indigo-300/50"><div className="border-2 border-dashed border-indigo-200/50 rounded-lg p-6"><p>도서를 선택하세요</p></div></div>;
+    return <div className="p-8 text-center text-green-300/50"><div className="border-2 border-dashed border-green-200/50 rounded-lg p-6"><p>확정된 도서 없음</p></div></div>;
+  };
+
+  // Render Component Blocks
+  const DiscoveryColumn = () => (
+    <div className="flex h-full flex-col rounded-none md:rounded-2xl bg-gray-50 border-x md:border border-gray-200 dark:bg-slate-800/50 dark:border-gray-700 w-full">
+        {/* Header Section */}
+        <div className="bg-white dark:bg-slate-800 p-4 border-b border-gray-200 dark:border-gray-700 md:rounded-t-2xl sticky top-0 z-10">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className={`flex h-6 w-6 items-center justify-center rounded text-white ${activeSource === 'editorRecommend' ? 'bg-green-500' : 'bg-blue-500'}`}>
+                   {activeSource === 'editorRecommend' ? <Library size={14} /> : <Search size={14} />}
+                </span>
+                <h2 className="font-bold text-gray-800 dark:text-gray-200 text-sm md:text-base truncate max-w-[200px]">
+                   {searchQuery ? '검색 결과' : activeSource === 'editorRecommend' ? '사서 추천' : activeSource === 'bestseller' ? '베스트셀러' : '도서 탐색'}
+                </h2>
+                <span className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full text-xs">{filteredDiscoveryBooks.length}</span>
+              </div>
+              <button onClick={() => { setPage(p => p + 1); if(searchQuery) handleSearch(undefined, page + 1); }} className="p-2 hover:bg-gray-100 rounded-full"><RotateCcw size={16} /></button>
+            </div>
+            
+            {/* Search Bar */}
+            <form onSubmit={(e) => handleSearch(e, 1)} className="flex gap-2 mb-2">
+               <select value={searchTarget} onChange={(e) => setSearchTarget(e.target.value as SearchTarget)} className="w-[80px] rounded-lg border border-gray-200 bg-gray-50 text-xs py-2 px-1 dark:bg-slate-700 dark:border-gray-600">
+                  <option value="Keyword">전체</option><option value="Title">제목</option><option value="Author">저자</option>
+               </select>
+               <div className="relative flex-1">
+                  <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="검색 (1년 이내)" className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-8 pr-3 text-xs dark:bg-slate-700 dark:border-gray-600" />
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+               </div>
+            </form>
+            <BookFilterPanel books={discoveryBooks} filterState={filterState} setFilterState={setFilterState} sortState={sortState} setSortState={setSortState} isOpen={isFilterOpen} onToggle={() => setIsFilterOpen(!isFilterOpen)} />
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-gray-50 dark:bg-slate-900/50">
+           {isLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin" /></div> : 
+             <div className="space-y-3 pb-20 md:pb-0">
+               {filteredDiscoveryBooks.length === 0 ? renderEmptyState('discovery') : filteredDiscoveryBooks.map(book => <BookCard key={book.id} book={book} onAction={moveBook} />)}
+             </div>
+           }
+        </div>
+    </div>
+  );
+
+  const ReviewColumn = () => (
+    <div className="flex h-full flex-col rounded-none md:rounded-2xl bg-indigo-50/50 border-x md:border border-indigo-100 dark:bg-slate-800/50 dark:border-gray-700 w-full">
+        <div className="p-4 border-b border-indigo-100 bg-white dark:bg-slate-800 md:rounded-t-2xl sticky top-0 z-10">
+           <div className="flex items-center gap-2">
+              <span className="bg-indigo-100 text-indigo-600 p-1 rounded"><BookOpen size={16} /></span>
+              <h2 className="font-bold">검토 대기</h2>
+              <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-xs">{reviewBooks.length}</span>
            </div>
-           <h3 className="text-lg font-bold text-gray-700 dark:text-gray-200">알라딘 API 키 필요</h3>
-           <p className="mb-6 text-sm">알라딘 TTB 키를 입력하여<br/>도서 검색 및 추천 기능을 사용하세요.</p>
-           <button onClick={() => setIsKeyModalOpen(true)} className="rounded-lg bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent-dark shadow-lg shadow-accent/20">
-              키 입력하기
-           </button>
         </div>
-      );
-    }
-    if (fetchError) {
-      return (
-        <div className="flex h-full flex-col items-center justify-center text-center text-gray-400 p-4">
-          <AlertCircle size={32} className="mb-2 text-red-400" />
-          <p className="text-sm text-red-500 break-keep">{fetchError}</p>
-          <button onClick={() => loadDiscoveryBooks(activeSource, page)} className="mt-4 text-sm underline hover:text-gray-600">
-            다시 시도
-          </button>
+        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar pb-20 md:pb-0">
+           <div className="space-y-3">
+              {reviewBooks.length === 0 ? renderEmptyState('review') : reviewBooks.map(book => <BookCard key={book.id} book={book} onAction={moveBook} />)}
+           </div>
         </div>
-      );
-    }
-    return (
-      <div className="flex h-full flex-col items-center justify-center text-center text-gray-400">
-         <Search size={32} className="mb-2 opacity-20" />
-         <p>검색 결과가 없습니다.</p>
-      </div>
-    );
-  };
+    </div>
+  );
+
+  const ConfirmedColumn = () => (
+    <div className="flex h-full flex-col rounded-none md:rounded-2xl bg-green-50/50 border-x md:border border-green-100 dark:bg-slate-800/50 dark:border-gray-700 w-full">
+        <div className="p-4 border-b border-green-100 bg-white dark:bg-slate-800 md:rounded-t-2xl sticky top-0 z-10">
+           <div className="flex items-center gap-2">
+              <span className="bg-green-100 text-green-600 p-1 rounded"><Star size={16} /></span>
+              <h2 className="font-bold">최종 확정</h2>
+              <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs">{confirmedBooks.length}</span>
+           </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 custom-scrollbar pb-24 md:pb-0 relative">
+           {/* Budget Dashboard (Desktop: Inline, Mobile: Hidden/Modal) */}
+           <div className="hidden md:block">
+              <BudgetDashboard status={budgetStatus} />
+           </div>
+
+           {/* AI Analysis Card */}
+           {analysis && (
+              <div className="mb-4 bg-white p-3 rounded-xl border border-green-100 shadow-sm animate-fade-in-up">
+                 <div className="flex gap-2 text-indigo-600 font-bold text-xs mb-2"><Sparkles size={14}/> AI 분석</div>
+                 <p className="text-xs text-gray-600 mb-2">{analysis.summary}</p>
+                 <div className="text-xs font-bold text-accent">추천 점수: {analysis.recommendationScore}점</div>
+              </div>
+           )}
+
+           <div className="space-y-3">
+              {confirmedBooks.length === 0 ? renderEmptyState('confirmed') : confirmedBooks.map(book => <BookCard key={book.id} book={book} onAction={moveBook} />)}
+           </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 border-t border-green-100 bg-white dark:bg-slate-800 md:rounded-b-2xl sticky bottom-[60px] md:bottom-0 z-20">
+           <div className="grid grid-cols-2 gap-2">
+              <button onClick={handleAnalyze} disabled={confirmedBooks.length === 0} className="flex items-center justify-center gap-2 bg-indigo-600 text-white py-2.5 rounded-lg text-sm font-bold shadow disabled:opacity-50">
+                {isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />} AI 분석
+              </button>
+              <button onClick={handleDownloadOrder} disabled={confirmedBooks.length === 0} className="flex items-center justify-center gap-2 bg-green-600 text-white py-2.5 rounded-lg text-sm font-bold shadow disabled:opacity-50">
+                <Download size={16} /> 주문서
+              </button>
+           </div>
+        </div>
+    </div>
+  );
 
   return (
     <div className="flex h-screen flex-col bg-gray-100 text-gray-900 dark:bg-slate-900 dark:text-gray-100 font-sans overflow-hidden">
       
-      {/* Header */}
-      <header className="z-30 shrink-0 bg-white border-b border-gray-200 px-6 py-3 dark:bg-slate-900 dark:border-gray-800 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white shadow-lg shadow-accent/30">
-              <TrendingUp size={20} />
+      {/* --- HEADER --- */}
+      <header className="z-30 shrink-0 bg-white border-b border-gray-200 dark:bg-slate-900 dark:border-gray-800 shadow-sm transition-all duration-300">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between mb-3 md:mb-0">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white shadow-lg">
+                <TrendingUp size={20} />
+              </div>
+              <h1 className="text-lg md:text-xl font-bold tracking-tight">
+                <span className="hidden md:inline">Smart</span>Acquisition
+              </h1>
             </div>
-            <h1 className="text-xl font-bold tracking-tight">
-              Smart<span className="text-accent">Acquisition</span> Board
-            </h1>
+            
+            {/* Desktop Settings Buttons */}
+            <div className="flex items-center gap-2">
+               <button onClick={() => setIsBudgetManagerOpen(true)} className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 text-sm font-medium"><PieChart size={16}/> 예산 관리</button>
+               <button onClick={() => setIsKeyModalOpen(true)} className="p-2 md:px-3 md:py-1.5 rounded-lg hover:bg-gray-100 text-gray-600 dark:text-gray-300">
+                 <Settings size={20} className="md:w-5 md:h-5" />
+               </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="flex rounded-lg bg-gray-100 p-1 dark:bg-slate-800 overflow-x-auto max-w-[600px] scrollbar-hide">
+          {/* Source Tabs (Scrollable on Mobile) */}
+          <div className="flex -mx-4 px-4 overflow-x-auto scrollbar-hide space-x-2 md:mx-0 md:px-0 md:mt-3 pb-1 md:pb-0">
+             {[
+               { id: 'combined', label: '종합 (100)', icon: BookCopy, color: 'text-accent' },
+               { id: 'bestseller', label: '베스트셀러', icon: Award, color: 'text-purple-600' },
+               { id: 'itemNewSpecial', label: '신간', icon: Zap, color: 'text-amber-600' },
+               { id: 'editorRecommend', label: '사서 추천', icon: Library, color: 'text-green-600' }
+             ].map((src) => (
                <button 
-                onClick={() => handleSourceChange('combined')} 
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-all whitespace-nowrap ${activeSource === 'combined' ? 'bg-white shadow text-accent font-bold' : 'text-gray-500'}`}
+                 key={src.id}
+                 onClick={() => handleSourceChange(src.id as FetchSource)}
+                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full whitespace-nowrap transition-all border ${activeSource === src.id ? `bg-white border-gray-200 shadow-sm font-bold ${src.color}` : 'border-transparent text-gray-500 hover:bg-gray-100'}`}
                >
-                 <BookCopy size={14} /> 종합 (100)
+                 <src.icon size={14} /> {src.label}
                </button>
-               <button 
-                onClick={() => handleSourceChange('bestseller')} 
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-all whitespace-nowrap ${activeSource === 'bestseller' ? 'bg-white shadow text-purple-600 font-bold' : 'text-gray-500'}`}
-               >
-                 <Award size={14} /> 베스트셀러
-               </button>
-               <button 
-                onClick={() => handleSourceChange('itemNewSpecial')} 
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-all whitespace-nowrap ${activeSource === 'itemNewSpecial' ? 'bg-white shadow text-amber-600 font-bold' : 'text-gray-500'}`}
-               >
-                 <Zap size={14} /> 주목할 신간
-               </button>
-               <button 
-                onClick={() => handleSourceChange('editorRecommend')} 
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-md transition-all whitespace-nowrap ${activeSource === 'editorRecommend' ? 'bg-white shadow text-green-600 font-bold' : 'text-gray-500'}`}
-               >
-                 <Library size={14} /> 사서 추천
-               </button>
-            </div>
-            <div className="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
-            
-            {/* Budget Button */}
-            <button
-               onClick={() => setIsBudgetManagerOpen(true)}
-               className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-100 text-gray-600 dark:text-gray-300 transition-colors whitespace-nowrap"
-            >
-               <PieChart size={18} />
-               예산 관리
-            </button>
-
-            <button
-              onClick={() => setIsKeyModalOpen(true)}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap ${(!apiKeys.aladinTtb && activeSource !== 'editorRecommend') || (!apiKeys.nlkApiKey && activeSource === 'editorRecommend') ? 'bg-red-100 text-red-600 animate-pulse' : 'hover:bg-gray-100 text-gray-600 dark:text-gray-300'}`}
-            >
-              <Settings size={18} />
-              설정
-            </button>
+             ))}
           </div>
         </div>
       </header>
 
-      {/* Kanban Board Area */}
-      <main className="flex flex-1 overflow-x-auto overflow-y-hidden p-6 gap-6 scrollbar-hide">
-        
-        {/* Column 1: Discovery */}
-        <div className="flex h-full w-full min-w-[350px] max-w-[400px] flex-col rounded-2xl bg-gray-50 border border-gray-200 dark:bg-slate-800/50 dark:border-gray-700">
-          <div className="flex flex-col border-b border-gray-200 dark:border-gray-700 bg-white rounded-t-2xl dark:bg-slate-800">
-            <div className="flex items-center justify-between p-4 pb-2">
-              <div className="flex items-center gap-2">
-                <div className={`flex h-6 w-6 items-center justify-center rounded text-white ${activeSource === 'editorRecommend' ? 'bg-green-500' : activeSource === 'bestseller' ? 'bg-purple-500' : activeSource === 'itemNewSpecial' ? 'bg-amber-500' : 'bg-blue-500'}`}>
-                  {activeSource === 'editorRecommend' ? <Library size={14} /> : activeSource === 'bestseller' ? <Award size={14} /> : activeSource === 'itemNewSpecial' ? <Zap size={14} /> : <Search size={14} />}
-                </div>
-                <h2 className="font-bold text-gray-800 dark:text-gray-200 line-clamp-1">
-                  {searchQuery ? `"${searchQuery}" 검색 결과` : 
-                    activeSource === 'editorRecommend' ? '국립중앙도서관 사서 추천' : 
-                    activeSource === 'bestseller' ? '알라딘 베스트셀러' : 
-                    activeSource === 'itemNewSpecial' ? '주목할 신간 (스테디)' : '도서 탐색'
-                  }
-                </h2>
-                <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium dark:bg-gray-700 shrink-0">
-                  {filteredDiscoveryBooks.length}
-                </span>
-              </div>
-              <button 
-                onClick={handleRefresh} 
-                className="text-gray-400 hover:text-accent transition-transform hover:rotate-180 active:scale-90"
-                title="새로고침"
-              >
-                <RotateCcwIcon size={16} />
-              </button>
-            </div>
-
-            {/* Search Input Area */}
-            <div className="px-4 pb-4">
-              <form onSubmit={(e) => handleSearch(e, 1)} className="flex gap-2">
-                 <select
-                  value={searchTarget}
-                  onChange={(e) => setSearchTarget(e.target.value as SearchTarget)}
-                  disabled={activeSource === 'editorRecommend'}
-                  className="rounded-lg border border-gray-200 bg-gray-50 py-2 px-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent disabled:opacity-50 dark:border-gray-700 dark:bg-slate-700 dark:text-white"
-                 >
-                   <option value="Keyword">전체</option>
-                   <option value="Title">제목</option>
-                   <option value="Author">저자</option>
-                   <option value="Publisher">출판사</option>
-                 </select>
-                 <div className="relative flex-1">
-                    <input 
-                      type="text" 
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder={activeSource === 'editorRecommend' ? "사서 추천 목록은 검색을 지원하지 않습니다" : "도서 검색 (1년 이내)"}
-                      disabled={activeSource === 'editorRecommend'}
-                      className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-4 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent disabled:opacity-50 dark:border-gray-700 dark:bg-slate-700 dark:text-white"
-                    />
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                </div>
-              </form>
-            </div>
-
-            {/* Filter Panel */}
-            <BookFilterPanel 
-              books={discoveryBooks}
-              filterState={filterState}
-              setFilterState={setFilterState}
-              sortState={sortState}
-              setSortState={setSortState}
-              isOpen={isFilterOpen}
-              onToggle={() => setIsFilterOpen(!isFilterOpen)}
-            />
-
+      {/* --- MAIN CONTENT --- */}
+      <main className="flex-1 overflow-hidden relative">
+        {/* Responsive Grid System */}
+        <div className="h-full w-full">
+          {/* Mobile View: Single Column based on active Tab */}
+          <div className="md:hidden h-full w-full">
+            {activeMobileTab === 'discovery' && <DiscoveryColumn />}
+            {activeMobileTab === 'review' && <ReviewColumn />}
+            {activeMobileTab === 'confirmed' && <ConfirmedColumn />}
           </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
-            {isLoading ? (
-              <div className="flex h-full flex-col items-center justify-center text-gray-400">
-                <Loader2 className="animate-spin mb-2 text-accent" size={32} />
-                <p>{isSearching ? "최근 도서를 검색하고 있습니다..." : "도서 정보를 불러오는 중..."}</p>
-              </div>
-            ) : (
-              <div className="space-y-3 h-full">
-                {filteredDiscoveryBooks.length === 0 ? (
-                    discoveryBooks.length > 0 ? (
-                        <div className="flex h-full flex-col items-center justify-center text-gray-400">
-                            <Filter size={32} className="mb-2 opacity-20" />
-                            <p>필터 조건에 맞는 도서가 없습니다.</p>
-                            <button onClick={() => setFilterState({ priceRange: 'all', categories: [], pubYear: 'all', publishers: []})} className="mt-2 text-accent text-sm underline">
-                                필터 초기화
-                            </button>
-                        </div>
-                    ) : renderDiscoveryEmptyState()
-                ) : (
-                  filteredDiscoveryBooks.map(book => (
-                    <BookCard key={book.id} book={book} onAction={moveBook} />
-                  ))
-                )}
-              </div>
-            )}
+
+          {/* Desktop/Tablet View: Grid */}
+          <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 p-6 h-full overflow-x-auto">
+             <div className="h-full min-w-[320px]"><DiscoveryColumn /></div>
+             <div className="h-full min-w-[320px]"><ReviewColumn /></div>
+             <div className="h-full min-w-[320px]"><ConfirmedColumn /></div>
           </div>
         </div>
-
-        {/* Arrow */}
-        <div className="hidden md:flex items-center text-gray-300">
-          <ArrowRight size={24} />
-        </div>
-
-        {/* Column 2: Review */}
-        <div className="flex h-full w-full min-w-[350px] max-w-[400px] flex-col rounded-2xl bg-indigo-50/50 border border-indigo-100 dark:bg-slate-800/50 dark:border-gray-700">
-          <div className="flex items-center justify-between border-b border-indigo-100 p-4 dark:border-gray-700 bg-white rounded-t-2xl dark:bg-slate-800">
-            <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-300">
-                <BookOpen size={14} />
-              </div>
-              <h2 className="font-bold text-gray-800 dark:text-gray-200">검토 대기</h2>
-              <span className="rounded-full bg-indigo-200 px-2 py-0.5 text-xs font-medium dark:bg-indigo-900">{reviewBooks.length}</span>
-            </div>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-            <div className="space-y-3 h-full">
-              {reviewBooks.length === 0 ? (
-                 <div className="flex h-full flex-col items-center justify-center text-indigo-300/50">
-                    <div className="rounded-lg border-2 border-dashed border-indigo-200/50 p-6 text-center">
-                      <p className="text-sm">왼쪽에서 도서를 선택하여<br/>이곳으로 옮기세요</p>
-                    </div>
-                 </div>
-              ) : (
-                reviewBooks.map(book => (
-                  <BookCard key={book.id} book={book} onAction={moveBook} />
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Arrow */}
-        <div className="hidden md:flex items-center text-gray-300">
-          <ArrowRight size={24} />
-        </div>
-
-        {/* Column 3: Confirmed */}
-        <div className="flex h-full w-full min-w-[350px] max-w-[400px] flex-col rounded-2xl bg-green-50/50 border border-green-100 dark:bg-slate-800/50 dark:border-gray-700">
-          <div className="flex items-center justify-between border-b border-green-100 p-4 dark:border-gray-700 bg-white rounded-t-2xl dark:bg-slate-800">
-            <div className="flex items-center gap-2">
-              <div className="flex h-6 w-6 items-center justify-center rounded bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300">
-                <Star size={14} />
-              </div>
-              <h2 className="font-bold text-gray-800 dark:text-gray-200">최종 확정</h2>
-              <span className="rounded-full bg-green-200 px-2 py-0.5 text-xs font-medium dark:bg-green-900">{confirmedBooks.length}</span>
-            </div>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-            
-            {/* Budget Dashboard */}
-            <BudgetDashboard status={budgetStatus} />
-
-            {/* Analysis Result Block */}
-            {analysis && (
-              <div className="mb-4 rounded-xl bg-white p-4 shadow-sm border border-green-100 dark:bg-slate-800 dark:border-gray-700 animate-fade-in-up">
-                 <div className="flex items-center gap-2 text-sm font-bold text-indigo-600 mb-2">
-                    <Sparkles size={16} /> AI 수서 분석
-                 </div>
-                 <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">{analysis.summary}</p>
-                 <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-gray-50 p-2 rounded dark:bg-gray-700">
-                      <span className="block font-semibold text-gray-500">예산</span>
-                      {analysis.budgetAnalysis}
-                    </div>
-                    <div className="bg-gray-50 p-2 rounded dark:bg-gray-700">
-                      <span className="block font-semibold text-gray-500">추천 점수</span>
-                      <span className="text-lg font-bold text-accent">{analysis.recommendationScore}</span>
-                    </div>
-                 </div>
-              </div>
-            )}
-
-            <div className="space-y-3 h-full">
-              {confirmedBooks.length === 0 ? (
-                 <div className="flex h-full flex-col items-center justify-center text-green-300/50">
-                    <div className="rounded-lg border-2 border-dashed border-green-200/50 p-6 text-center">
-                       <p className="text-sm">구매 확정된 도서가<br/>이곳에 표시됩니다</p>
-                    </div>
-                 </div>
-              ) : (
-                confirmedBooks.map(book => (
-                  <BookCard key={book.id} book={book} onAction={moveBook} />
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Action Footer */}
-          <div className="p-4 border-t border-green-100 dark:border-gray-700 bg-white rounded-b-2xl dark:bg-slate-800">
-             <div className="grid grid-cols-2 gap-2">
-                <button 
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing || confirmedBooks.length === 0}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                >
-                  {isAnalyzing ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
-                  AI 분석
-                </button>
-                <button 
-                  disabled={confirmedBooks.length === 0}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-green-600 py-2 text-sm font-bold text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-                  onClick={handleDownloadOrder}
-                >
-                  <Download size={16} />
-                  주문서
-                </button>
-             </div>
-          </div>
-        </div>
-
       </main>
 
-      <ApiKeyModal
-        isOpen={isKeyModalOpen}
-        onClose={() => setIsKeyModalOpen(false)}
-        onSave={handleSaveKeys}
-        initialKeys={apiKeys}
-      />
+      {/* --- MOBILE BOTTOM NAVIGATION --- */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-[60px] bg-white border-t border-gray-200 dark:bg-slate-900 dark:border-gray-800 flex items-center justify-around z-40 pb-safe">
+         <button onClick={() => setActiveMobileTab('discovery')} className={`flex flex-col items-center gap-1 p-2 ${activeMobileTab === 'discovery' ? 'text-accent' : 'text-gray-400'}`}>
+            <LayoutList size={20} /> <span className="text-[10px] font-bold">탐색</span>
+         </button>
+         <button onClick={() => setActiveMobileTab('review')} className={`flex flex-col items-center gap-1 p-2 ${activeMobileTab === 'review' ? 'text-indigo-500' : 'text-gray-400'}`}>
+            <CheckSquare size={20} /> <span className="text-[10px] font-bold">검토</span>
+            {reviewBooks.length > 0 && <span className="absolute top-2 ml-4 w-4 h-4 bg-indigo-500 rounded-full text-[9px] text-white flex items-center justify-center">{reviewBooks.length}</span>}
+         </button>
+         <button onClick={() => setActiveMobileTab('confirmed')} className={`flex flex-col items-center gap-1 p-2 ${activeMobileTab === 'confirmed' ? 'text-green-600' : 'text-gray-400'}`}>
+            <Star size={20} /> <span className="text-[10px] font-bold">확정</span>
+            {confirmedBooks.length > 0 && <span className="absolute top-2 ml-4 w-4 h-4 bg-green-500 rounded-full text-[9px] text-white flex items-center justify-center">{confirmedBooks.length}</span>}
+         </button>
+      </div>
 
-      <BudgetManager
-        isOpen={isBudgetManagerOpen}
-        onClose={() => setIsBudgetManagerOpen(false)}
-        onSave={(newSettings) => setBudgetSettings(newSettings)}
-        currentSettings={budgetSettings}
-      />
+      {/* --- MOBILE FLOATING ACTION BUTTON (Budget) --- */}
+      <div className="md:hidden fixed bottom-[70px] right-4 z-40">
+        <button 
+          onClick={() => setIsBudgetDashboardOpen(true)}
+          className="flex items-center justify-center w-12 h-12 bg-gray-900 text-white rounded-full shadow-xl hover:bg-gray-800 transition-transform active:scale-95"
+        >
+          <PieChart size={24} />
+        </button>
+      </div>
+
+      {/* --- MODALS --- */}
+      <ApiKeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} onSave={(k) => { setApiKeys(k); localStorage.setItem('smart_acquisition_keys', JSON.stringify(k)); window.location.reload(); }} initialKeys={apiKeys} />
+      <BudgetManager isOpen={isBudgetManagerOpen} onClose={() => setIsBudgetManagerOpen(false)} onSave={setBudgetSettings} currentSettings={budgetSettings} />
+
+      {/* Mobile Budget Modal */}
+      {isBudgetDashboardOpen && (
+         <div className="fixed inset-0 z-50 flex items-end justify-center md:hidden">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsBudgetDashboardOpen(false)} />
+            <div className="relative w-full bg-white dark:bg-slate-900 rounded-t-2xl p-4 animate-fade-in-up">
+               <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-lg">예산 현황</h3>
+                  <div className="flex gap-2">
+                     <button onClick={() => { setIsBudgetDashboardOpen(false); setIsBudgetManagerOpen(true); }} className="text-sm bg-gray-100 px-3 py-1 rounded">설정</button>
+                     <button onClick={() => setIsBudgetDashboardOpen(false)}><X size={24} className="text-gray-500"/></button>
+                  </div>
+               </div>
+               <BudgetDashboard status={budgetStatus} compact={true} />
+            </div>
+         </div>
+      )}
     </div>
   );
 }
-
-const RotateCcwIcon = ({ size }: { size: number }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-);
 
 export default App;
