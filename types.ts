@@ -14,6 +14,7 @@ export interface Book {
   link: string;
   categoryName?: string;
   status?: BookStatus; // New field for Kanban
+  customerReviewRank?: number; // Added for detail view
 }
 
 export type BookStatus = 'discovery' | 'review' | 'confirmed';

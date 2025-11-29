@@ -141,7 +141,8 @@ const mapAladinItemToBook = (item: any): Book => ({
   priceSales: item.priceSales,
   link: item.link,
   categoryName: item.categoryName,
-  status: 'discovery'
+  status: 'discovery',
+  customerReviewRank: item.customerReviewRank || 0
 });
 
 const isWithinOneYear = (dateStr: string): boolean => {
@@ -243,7 +244,8 @@ export const fetchBooks = async (source: FetchSource, ttbKey?: string, nlkKey?: 
           priceSales: 0,    // Not provided in this API
           link: '',
           categoryName: drCodeName,
-          status: 'discovery'
+          status: 'discovery',
+          customerReviewRank: 0
         });
       }
       

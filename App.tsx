@@ -251,11 +251,14 @@ function App() {
             <BookFilterPanel books={discoveryBooks} filterState={filterState} setFilterState={setFilterState} sortState={sortState} setSortState={setSortState} isOpen={isFilterOpen} onToggle={() => setIsFilterOpen(!isFilterOpen)} />
         </div>
 
-        {/* List */}
+        {/* List (Converted to Responsive Grid) */}
         <div className="flex-1 overflow-y-auto p-3 custom-scrollbar bg-gray-50 dark:bg-slate-900/50">
            {isLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin" /></div> : 
-             <div className="space-y-3 pb-20 md:pb-0">
-               {filteredDiscoveryBooks.length === 0 ? renderEmptyState('discovery') : filteredDiscoveryBooks.map(book => <BookCard key={book.id} book={book} onAction={moveBook} />)}
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20 md:pb-0">
+               {filteredDiscoveryBooks.length === 0 ? 
+                 <div className="col-span-full">{renderEmptyState('discovery')}</div> : 
+                 filteredDiscoveryBooks.map(book => <BookCard key={book.id} book={book} onAction={moveBook} />)
+               }
              </div>
            }
         </div>
@@ -380,9 +383,22 @@ function App() {
 
           {/* Desktop/Tablet View: Grid */}
           <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-3 gap-6 p-6 h-full overflow-x-auto">
-             <div className="h-full min-w-[320px]"><DiscoveryColumn /></div>
+             {/* Discovery Column (Wider on large screens) */}
+             <div className="h-full min-w-[320px] lg:col-span-1 xl:col-span-2"><DiscoveryColumn /></div>
+             
+             {/* Review Column */}
              <div className="h-full min-w-[320px]"><ReviewColumn /></div>
-             <div className="h-full min-w-[320px]"><ConfirmedColumn /></div>
+             
+             {/* Confirmed Column (Hidden in 2-col mode if we want, but grid-cols-3 fits all) */}
+             <div className="hidden xl:block h-full min-w-[320px]"><ConfirmedColumn /></div>
+             
+             {/* Note: The grid layout adjustment logic above is slightly tricky with fixed columns. 
+                 Let's stick to the 3-column Kanban as requested in previous steps, but Discovery content is now a Grid.
+                 The previous CSS `grid-cols-3` handles the main layout.
+                 If screen is huge (xl), maybe we want Discovery to take more space?
+                 For now, keeping standard 3 columns but Discovery internal content is a grid.
+             */}
+             <div className="xl:hidden h-full min-w-[320px]"><ConfirmedColumn /></div>
           </div>
         </div>
       </main>
