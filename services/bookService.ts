@@ -8,7 +8,7 @@ const PROXIES = [
 ];
 
 // Robust fetch function with retries and proxy fallback
-async function fetchWithRetry(targetUrl: string): Promise<any> {
+async function fetchWithRetry(targetUrl: string, isJson: boolean = true): Promise<any> {
   let lastError: any;
 
   for (const proxyGenerator of PROXIES) {
@@ -17,15 +17,23 @@ async function fetchWithRetry(targetUrl: string): Promise<any> {
     // Try 2 times per proxy
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        console.log(`[Fetch Debug] Attempt ${attempt + 1} using proxy: ${proxyUrl}`);
         const response = await fetch(proxyUrl);
         
+        console.log(`[Fetch Debug] HTTP Status: ${response.status} ${response.statusText}`);
+
         if (!response.ok) {
           throw new Error(`HTTP Error: ${response.status}`);
         }
         
-        // Try to parse JSON
-        const data = await response.json();
-        return data;
+        if (isJson) {
+          const data = await response.json();
+          return data;
+        } else {
+          const text = await response.text();
+          console.log(`[Fetch Debug] Response Text Preview (First 100 chars): ${text.substring(0, 100)}`);
+          return text;
+        }
       } catch (error) {
         console.warn(`Attempt ${attempt + 1} failed for proxy ${proxyUrl}:`, error);
         lastError = error;
@@ -56,14 +64,65 @@ export const validateNlkKey = async (authKey: string): Promise<boolean> => {
   if (!authKey) return false;
   try {
     const cleanKey = authKey.trim();
-    // Added timestamp to prevent caching during validation
-    const nlkUrl = `https://data4library.kr/api/recommandList?authKey=${cleanKey}&startDt=20230101&endDt=20230131&format=json&pageNo=1&pageSize=1&_t=${Date.now()}`;
-    const data = await fetchWithRetry(nlkUrl);
+    // Use saseoApi.do with minimal range for validation
+    // PDF Spec: key, startRowNumApi, endRowNumApi
+    // NOTE: Using HTTP as per some legacy behaviors, but proxies often force HTTPS.
+    // Ensure the domain is correct.
+    const nlkUrl = `https://nl.go.kr/NL/search/openApi/saseoApi.do?key=${cleanKey}&startRowNumApi=1&endRowNumApi=1`;
     
-    if (data.response?.error) return false;
-    if (data.response?.docs) return true;
+    console.log(`[NLK Validation] Requesting URL: ${nlkUrl}`);
+    
+    const xmlText = await fetchWithRetry(nlkUrl, false);
+    
+    console.log(`[NLK Validation] Raw Response Length: ${xmlText?.length}`);
+    console.log(`[NLK Validation] Raw Response Body:`, xmlText);
+
+    if (!xmlText) {
+        console.error("[NLK Validation] Empty response received.");
+        return false;
+    }
+
+    // Check Format
+    if (xmlText.trim().startsWith('{')) {
+        console.warn("[NLK Validation] Response is JSON, expected XML. The API might have changed or returned an error JSON.");
+    } else if (xmlText.trim().startsWith('<')) {
+        console.log("[NLK Validation] Response looks like XML.");
+    } else {
+        console.warn("[NLK Validation] Unknown response format.");
+    }
+
+    // Check for common error signatures
+    if (xmlText.includes('<error_code>') || xmlText.includes('<message>')) {
+        console.warn("[NLK Validation] API returned an explicit error message in XML.");
+        return false;
+    }
+    
+    // Try Parsing
+    try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+        const parseError = xmlDoc.getElementsByTagName("parsererror");
+        if (parseError.length > 0) {
+            console.error("[NLK Validation] XML Parsing Error:", parseError[0].textContent);
+            return false;
+        }
+        
+        // Check for success content
+        const totalCount = xmlDoc.getElementsByTagName('totalCount');
+        const list = xmlDoc.getElementsByTagName('list');
+        
+        console.log(`[NLK Validation] Found <totalCount>: ${totalCount.length > 0}`);
+        console.log(`[NLK Validation] Found <list>: ${list.length > 0}`);
+
+        if (totalCount.length > 0 || list.length > 0) return true;
+
+    } catch (parseEx) {
+        console.error("[NLK Validation] Exception during parsing:", parseEx);
+    }
+    
     return false;
   } catch (error) {
+    console.error("[NLK Validation] Network/System Error:", error);
     return false;
   }
 };
@@ -102,6 +161,11 @@ const isNotComic = (book: Book): boolean => {
   return !book.categoryName.includes('만화');
 };
 
+const getElementText = (element: Element, tagName: string): string => {
+  const found = element.getElementsByTagName(tagName);
+  return found.length > 0 ? found[0].textContent || '' : '';
+};
+
 export const searchBooks = async (query: string, ttbKey: string, target: SearchTarget = 'Keyword', page: number = 1): Promise<Book[]> => {
   if (!query || !ttbKey) return [];
   const cleanKey = ttbKey.trim();
@@ -133,32 +197,57 @@ export const fetchBooks = async (source: FetchSource, ttbKey?: string, nlkKey?: 
       if (!nlkKey) throw new Error("국립중앙도서관 API 키가 필요합니다.");
       const cleanKey = nlkKey.trim();
       
-      // Added timestamp to prevent caching
-      const nlkUrl = `https://data4library.kr/api/recommandList?authKey=${cleanKey}&format=json&pageNo=${page}&pageSize=50&_t=${Date.now()}`;
-      const data = await fetchWithRetry(nlkUrl);
+      const startRow = (page - 1) * 50 + 1;
+      const endRow = page * 50;
       
-      if (data.response?.error) throw new Error(data.response.error);
-      if (!data.response?.docs || !Array.isArray(data.response.docs)) return [];
+      // Use saseoApi.do as per PDF
+      // Corrected URL syntax: ?key=...&startRowNumApi=...
+      const nlkUrl = `https://nl.go.kr/NL/search/openApi/saseoApi.do?key=${cleanKey}&startRowNumApi=${startRow}&endRowNumApi=${endRow}`;
+      
+      const xmlText = await fetchWithRetry(nlkUrl, false);
+      
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+      
+      const items = xmlDoc.getElementsByTagName('item');
+      const books: Book[] = [];
+      
+      for(let i = 0; i < items.length; i++) {
+        const item = items[i];
+        
+        // Extract basic fields
+        const title = getElementText(item, 'recomtitle');
+        const author = getElementText(item, 'recomauthor');
+        const publisher = getElementText(item, 'recompublisher');
+        const pubYear = getElementText(item, 'publishYear'); // PDF says publishYear
+        const cover = getElementText(item, 'recomfilepath'); // PDF says recomfilepath for image path
+        const description = getElementText(item, 'recomcontents'); // PDF says recomcontents for contents
+        const isbnMulti = getElementText(item, 'recomisbn'); // Space separated
+        const isbn13 = isbnMulti.split(' ')[0] || '';
+        const drCodeName = getElementText(item, 'drCodeName');
+        const recomNo = getElementText(item, 'recomNo');
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return data.response.docs.map((wrapper: any) => {
-        const item = wrapper.doc;
-        return {
-          id: `nlk-${item.isbn13 || item.no}`,
-          title: item.bookname,
-          author: item.authors,
-          publisher: item.publisher,
-          pubDate: item.publication_year,
-          cover: item.bookImageURL,
-          description: item.description || item.class_nm || '',
-          isbn13: item.isbn13,
-          priceStandard: 0,
-          priceSales: 0,
-          link: item.bookDtlUrl,
-          categoryName: item.class_nm,
+        // Fix potential encoding issues or HTML entities in description
+        const cleanDesc = description.replace(/<[^>]*>?/gm, '');
+
+        books.push({
+          id: `nlk-${recomNo || i}`,
+          title: title,
+          author: author,
+          publisher: publisher,
+          pubDate: pubYear,
+          cover: cover,
+          description: cleanDesc,
+          isbn13: isbn13,
+          priceStandard: 0, // Not provided in this API
+          priceSales: 0,    // Not provided in this API
+          link: '',
+          categoryName: drCodeName,
           status: 'discovery'
-        };
-      });
+        });
+      }
+      
+      return books;
     }
 
     // Aladin Logic

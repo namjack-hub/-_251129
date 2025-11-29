@@ -34,7 +34,14 @@ function App() {
   
   const [apiKeys, setApiKeys] = useState<ApiKeys>(() => {
     const saved = localStorage.getItem('smart_acquisition_keys');
-    return saved ? JSON.parse(saved) : { aladinTtb: '', nlkApiKey: '' };
+    const initial = saved ? JSON.parse(saved) : { aladinTtb: '', nlkApiKey: '' };
+    
+    // Set default Aladin Key if empty
+    if (!initial.aladinTtb) {
+      initial.aladinTtb = 'ttbnamyeogi1645001';
+    }
+    
+    return initial;
   });
 
   // Update excluded IDs ref whenever lists change
