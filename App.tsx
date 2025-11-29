@@ -1,11 +1,11 @@
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Book, ApiKeys, FetchSource, GeminiAnalysis, SearchTarget } from './types';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Book, ApiKeys, FetchSource, GeminiAnalysis, SearchTarget, FilterState, SortState } from './types';
 import { fetchBooks, searchBooks } from './services/bookService';
 import { analyzeAcquisitionList } from './services/geminiService';
 import BookCard from './components/BookCard';
 import ApiKeyModal from './components/ApiKeyModal';
-import { Settings, Search, BookOpen, Star, TrendingUp, ArrowRight, Sparkles, Download, Loader2, AlertCircle, Key, Library, BookCopy, Zap, Award } from 'lucide-react';
+import BookFilterPanel from './components/BookFilterPanel';
+import { Settings, Search, BookOpen, Star, TrendingUp, ArrowRight, Sparkles, Download, Loader2, AlertCircle, Key, Library, BookCopy, Zap, Award, RotateCcw, Filter } from 'lucide-react';
 
 function App() {
   // Kanban Columns
@@ -32,6 +32,26 @@ function App() {
   const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
+  // --- Filter & Sort States ---
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filterState, setFilterState] = useState<FilterState>(() => {
+    const saved = localStorage.getItem('smart_acquisition_filters');
+    return saved ? JSON.parse(saved) : {
+      priceRange: 'all',
+      categories: [],
+      pubYear: 'all',
+      publishers: []
+    };
+  });
+  
+  const [sortState, setSortState] = useState<SortState>(() => {
+    const saved = localStorage.getItem('smart_acquisition_sort');
+    return saved ? JSON.parse(saved) : {
+      field: 'pubDate',
+      direction: 'desc'
+    };
+  });
+
   const [apiKeys, setApiKeys] = useState<ApiKeys>(() => {
     const saved = localStorage.getItem('smart_acquisition_keys');
     const initial = saved ? JSON.parse(saved) : { aladinTtb: '', nlkApiKey: '' };
@@ -44,10 +64,94 @@ function App() {
     return initial;
   });
 
+  // Persist Filters & Sort
+  useEffect(() => {
+    localStorage.setItem('smart_acquisition_filters', JSON.stringify(filterState));
+  }, [filterState]);
+
+  useEffect(() => {
+    localStorage.setItem('smart_acquisition_sort', JSON.stringify(sortState));
+  }, [sortState]);
+
   // Update excluded IDs ref whenever lists change
   useEffect(() => {
     excludedIdsRef.current = new Set([...reviewBooks, ...confirmedBooks].map(b => b.id));
   }, [reviewBooks, confirmedBooks]);
+
+  // --- Filtering & Sorting Logic (useMemo) ---
+  const filteredDiscoveryBooks = useMemo(() => {
+    let result = [...discoveryBooks];
+
+    // 1. Filter
+    if (filterState.priceRange !== 'all') {
+      result = result.filter(book => {
+        const price = book.priceSales;
+        switch (filterState.priceRange) {
+          case 'under_10k': return price < 10000;
+          case '10k_20k': return price >= 10000 && price < 20000;
+          case '20k_30k': return price >= 20000 && price < 30000;
+          case 'over_30k': return price >= 30000;
+          default: return true;
+        }
+      });
+    }
+
+    if (filterState.pubYear !== 'all') {
+      const now = new Date();
+      result = result.filter(book => {
+        const pubDate = new Date(book.pubDate);
+        if (isNaN(pubDate.getTime())) return true;
+        const diffTime = Math.abs(now.getTime() - pubDate.getTime());
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        
+        switch (filterState.pubYear) {
+          case '1yr': return diffDays <= 365;
+          case '3yr': return diffDays <= 365 * 3;
+          case '5yr': return diffDays <= 365 * 5;
+          default: return true;
+        }
+      });
+    }
+
+    if (filterState.categories.length > 0) {
+      result = result.filter(book => {
+        if (!book.categoryName) return false;
+        // Check if any selected category matches
+        return filterState.categories.some(cat => book.categoryName?.includes(cat));
+      });
+    }
+
+    if (filterState.publishers.length > 0) {
+      result = result.filter(book => filterState.publishers.includes(book.publisher));
+    }
+
+    // 2. Sort
+    result.sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortState.field) {
+        case 'priceSales':
+          comparison = a.priceSales - b.priceSales;
+          break;
+        case 'pubDate':
+          comparison = new Date(a.pubDate).getTime() - new Date(b.pubDate).getTime();
+          break;
+        case 'title':
+          comparison = a.title.localeCompare(b.title);
+          break;
+        case 'author':
+          comparison = a.author.localeCompare(b.author);
+          break;
+        default:
+          comparison = 0;
+      }
+
+      return sortState.direction === 'asc' ? comparison : -comparison;
+    });
+
+    return result;
+  }, [discoveryBooks, filterState, sortState]);
+
 
   // Data Fetching
   const loadDiscoveryBooks = useCallback(async (source: FetchSource, currentPage: number) => {
@@ -338,7 +442,9 @@ function App() {
                     activeSource === 'itemNewSpecial' ? '주목할 신간 (스테디)' : '도서 탐색'
                   }
                 </h2>
-                <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium dark:bg-gray-700 shrink-0">{discoveryBooks.length}</span>
+                <span className="rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium dark:bg-gray-700 shrink-0">
+                  {filteredDiscoveryBooks.length}
+                </span>
               </div>
               <button 
                 onClick={handleRefresh} 
@@ -376,6 +482,18 @@ function App() {
                 </div>
               </form>
             </div>
+
+            {/* Filter Panel (Inserted here) */}
+            <BookFilterPanel 
+              books={discoveryBooks}
+              filterState={filterState}
+              setFilterState={setFilterState}
+              sortState={sortState}
+              setSortState={setSortState}
+              isOpen={isFilterOpen}
+              onToggle={() => setIsFilterOpen(!isFilterOpen)}
+            />
+
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar relative">
@@ -386,8 +504,18 @@ function App() {
               </div>
             ) : (
               <div className="space-y-3 h-full">
-                {discoveryBooks.length === 0 ? renderDiscoveryEmptyState() : (
-                  discoveryBooks.map(book => (
+                {filteredDiscoveryBooks.length === 0 ? (
+                    discoveryBooks.length > 0 ? (
+                        <div className="flex h-full flex-col items-center justify-center text-gray-400">
+                            <Filter size={32} className="mb-2 opacity-20" />
+                            <p>필터 조건에 맞는 도서가 없습니다.</p>
+                            <button onClick={() => setFilterState({ priceRange: 'all', categories: [], pubYear: 'all', publishers: []})} className="mt-2 text-accent text-sm underline">
+                                필터 초기화
+                            </button>
+                        </div>
+                    ) : renderDiscoveryEmptyState()
+                ) : (
+                  filteredDiscoveryBooks.map(book => (
                     <BookCard key={book.id} book={book} onAction={moveBook} />
                   ))
                 )}
